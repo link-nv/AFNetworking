@@ -22,7 +22,14 @@
 
 #import "AFJSONUtilities.h"
 
+id AFJSONNormalizeObject(id object, NSError **error);
+
 NSData * AFJSONEncode(id object, NSError **error) {
+    object = AFJSONNormalizeObject(object, error);
+    if (!object)
+        // Object cannot be normalized.
+        return nil;
+
     NSData *data = nil;
     
     SEL _JSONKitSelector = NSSelectorFromString(@"JSONDataWithOptions:error:"); 
@@ -51,7 +58,7 @@ NSData * AFJSONEncode(id object, NSError **error) {
         NSUInteger serializeOptionFlags = 0;
         [invocation setArgument:&serializeOptionFlags atIndex:2]; // arguments 0 and 1 are self and _cmd respectively, automatically set by NSInvocation
         if (error != NULL) {
-            [invocation setArgument:error atIndex:3];
+            [invocation setArgument:&error atIndex:3];
         }
         
         [invocation invoke];
@@ -105,7 +112,7 @@ NSData * AFJSONEncode(id object, NSError **error) {
         NSUInteger writeOptions = 0;
         [invocation setArgument:&writeOptions atIndex:3];
         if (error != NULL) {
-            [invocation setArgument:error atIndex:4];
+            [invocation setArgument:&error atIndex:4];
         }
 
         [invocation invoke];
@@ -118,7 +125,90 @@ NSData * AFJSONEncode(id object, NSError **error) {
     return data;
 }
 
-id AFJSONDecode(NSData *data, NSError **error) {    
+static BOOL AFJSONIsNormalObject(id object, NSError **error) {
+
+    if ([object isKindOfClass:[NSString class]] || [object isKindOfClass:[NSNumber class]] || [object isKindOfClass:[NSNull class]])
+        // Object is normal.
+        return YES;
+
+    if ([object isKindOfClass:[NSSet class]] || [object isKindOfClass:[NSOrderedSet class]])
+        // Object is not normal.
+        return NO;
+
+    if ([object isKindOfClass:[NSArray class]]) {
+        // Object may be normal.
+        for (id element in object)
+            if (!AFJSONIsNormalObject(element, error))
+                return NO;
+
+        return YES;
+    }
+    if ([object isKindOfClass:[NSDictionary class]]) {
+        // Object may be normal.
+        for (id key in [object allKeys])
+            if (!AFJSONIsNormalObject(key, error) || !AFJSONIsNormalObject([object objectForKey:key], error))
+                return NO;
+
+        return YES;
+    }
+
+    // Object cannot be normalized.
+    *error = [NSError errorWithDomain:@"AFErrorDomain" code:-1L
+                             userInfo:@{NSLocalizedDescriptionKey:[NSString stringWithFormat:@"Objects of type %@ cannot be serialized.", [object class]]}];
+    return NO;
+}
+
+id AFJSONNormalizeObject(id object, NSError **error) {
+
+    *error = nil;
+    if (AFJSONIsNormalObject(object, error))
+        // Object is normal.
+        return object;
+    if (*error)
+        // AFJSONIsNormalObject found that object cannot be normalized.
+        return nil;
+
+    if ([object isKindOfClass:[NSDictionary class]]) {
+        // A dictionary that is not yet normal.
+        NSMutableDictionary *normalObject = [NSMutableDictionary dictionaryWithCapacity:[object count]];
+        for (id key in [object allKeys]) {
+
+            id normalElement = AFJSONNormalizeObject([object objectForKey:key], error);
+            if (!normalElement)
+                return nil;
+
+            id normalKey = AFJSONNormalizeObject(key, error);
+            if (!normalKey)
+                return nil;
+
+            [normalObject setObject:normalElement forKey:normalKey];
+        }
+
+        NSLog(@"dict normalized:\n%@\n=>\n%@", object, normalObject);
+        return normalObject;
+    }
+
+    if ([object conformsToProtocol:@protocol(NSFastEnumeration)]) {
+        // An enumerable that is not yet normal.
+        NSMutableArray *normalObject = [NSMutableArray arrayWithCapacity:[object count]];
+        for (id element in object) {
+
+            id normalElement = AFJSONNormalizeObject(element, error);
+            if (!normalElement)
+                return nil;
+
+            [normalObject addObject:normalElement];
+        }
+
+        NSLog(@"enumerable normalized:\n%@\n=>\n%@", object, normalObject);
+        return normalObject;
+    }
+
+    assert(error); // An error should've been set by AFJSONIsNormalObject
+    return nil;
+}
+
+id AFJSONDecode(NSData *data, NSError **error) {
     id JSON = nil;
     
     SEL _JSONKitSelector = NSSelectorFromString(@"objectFromJSONDataWithParseOptions:error:"); 
