@@ -184,7 +184,6 @@ id AFJSONNormalizeObject(id object, NSError **error) {
             [normalObject setObject:normalElement forKey:normalKey];
         }
 
-        NSLog(@"dict normalized:\n%@\n=>\n%@", object, normalObject);
         return normalObject;
     }
 
@@ -200,7 +199,6 @@ id AFJSONNormalizeObject(id object, NSError **error) {
             [normalObject addObject:normalElement];
         }
 
-        NSLog(@"enumerable normalized:\n%@\n=>\n%@", object, normalObject);
         return normalObject;
     }
 
